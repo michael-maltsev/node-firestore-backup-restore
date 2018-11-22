@@ -198,14 +198,14 @@ var accountDb = accountCredentialsPath ? accountApp.firestore() : null;
 var restoreAccountDb = exports.restoreAccountDb = restoreAccountCredentialsPath ? restoreAccountApp.firestore() : null;
 
 var restoreDocument = function restoreDocument(collectionName, document) {
-  if (!document.exists) {
+  if (!document.exists || !restoreAccountDb) {
     return Promise.resolve(null);
   }
   var restoreMsg = 'Restoring to collection ' + collectionName + ' document ' + document.id;
   console.log(restoreMsg + '...');
   return Promise.resolve(
   // TODO: use saveDocument using merge as an option
-  !restoreAccountDb ? null : restoreAccountDb.collection(collectionName).doc(document.id).set(document.data())).catch(function (error) {
+  restoreAccountDb.collection(collectionName).doc(document.id).set(document.data())).catch(function (error) {
     console.log(_colors2.default.bold(_colors2.default.red('Error! ' + restoreMsg + ' - ' + error)));
   });
 };

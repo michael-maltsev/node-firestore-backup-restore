@@ -273,7 +273,7 @@ export const restoreAccountDb = restoreAccountCredentialsPath
   : null;
 
 const restoreDocument = (collectionName: string, document: Object) => {
-  if (!document.exists) {
+  if (!document.exists || !restoreAccountDb) {
     return Promise.resolve(null)
   }
   const restoreMsg = `Restoring to collection ${collectionName} document ${
@@ -282,12 +282,10 @@ const restoreDocument = (collectionName: string, document: Object) => {
   console.log(`${restoreMsg}...`);
   return Promise.resolve(
     // TODO: use saveDocument using merge as an option
-    !restoreAccountDb
-      ? null
-      : restoreAccountDb
-          .collection(collectionName)
-          .doc(document.id)
-          .set(document.data())
+    restoreAccountDb
+      .collection(collectionName)
+      .doc(document.id)
+      .set(document.data())
   ).catch(error => {
     console.log(
       colors.bold(colors.red(`Error! ${restoreMsg}` + ' - ' + error))
