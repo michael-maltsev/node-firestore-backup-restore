@@ -103,13 +103,6 @@ var plainJSONBackup = _commander2.default[plainJSONBackupParamKey] !== undefined
 
 var accountApp = accountCredentialsPath ? (0, _FirestoreFunctions.getFireApp)(accountCredentialsPath) : {};
 
-try {
-  _mkdirp2.default.sync(backupPath);
-} catch (error) {
-  console.log(_colors2.default.bold(_colors2.default.red('Unable to create backup path: ')) + _colors2.default.bold(backupPath) + ' - ' + error);
-  _process2.default.exit(1);
-}
-
 var restoreAccountApp = restoreAccountCredentialsPath ? (0, _FirestoreFunctions.getFireApp)(restoreAccountCredentialsPath) : {};
 
 // from: https://hackernoon.com/functional-javascript-resolving-promises-sequentially-7aac18c4431e
@@ -123,44 +116,34 @@ var promiseSerial = function promiseSerial(funcs) {
   }, Promise.resolve([]));
 };
 
-var backupDocument = function backupDocument(document, backupPath, logPath) {
+var backupDocument = function backupDocument(document, backupData, logPath) {
   console.log("Backing up" + (document.exists ? " " : " (empty) ") + "Document '" + logPath + document.id + "'" + (plainJSONBackup === true ? ' with -J --plainJSONBackup' : ' with type information'));
 
   try {
-    _mkdirp2.default.sync(backupPath);
     if (document.exists) {
       var fileContents = void 0;
       var documentBackup = plainJSONBackup === true ? document.data() : (0, _FirestoreDocument.constructDocumentObjectToBackup)(document.data());
-      if (prettyPrint === true) {
-        if (stable === true) {
-          fileContents = (0, _jsonStableStringify2.default)(documentBackup, { space: 2 });
-        } else {
-          fileContents = JSON.stringify(documentBackup, null, 2);
-        }
-      } else {
-        if (stable === true) {
-          fileContents = (0, _jsonStableStringify2.default)(documentBackup);
-        } else {
-          fileContents = JSON.stringify(documentBackup);
-        }
-      }
-      _fs2.default.writeFileSync(backupPath + '/' + document.id + '.json', fileContents);
+      Object.assign(backupData, documentBackup);
     }
 
     return document.ref.getCollections().then(function (collections) {
+      if (collections.length > 0) {
+        backupData['__collections__'] = {};
+      }
       return promiseSerial(collections.map(function (collection) {
         return function () {
-          return backupCollection(collection, backupPath + '/' + collection.id, logPath + document.id + '/');
+          backupData['__collections__'][collection.id] = {};
+          return backupCollection(collection, backupData['__collections__'][collection.id], logPath + document.id + '/');
         };
       }));
     });
   } catch (error) {
-    console.log(_colors2.default.bold(_colors2.default.red("Unable to create backup path or write file, skipping backup of Document '" + document.id + "': ")) + _colors2.default.bold(backupPath) + ' - ' + error);
+    console.log(_colors2.default.bold(_colors2.default.red("Error, skipping backup of Document '" + document.id + "': ")) + error);
     return Promise.reject(error);
   }
 };
 
-var backupCollection = function backupCollection(collection, backupPath, logPath) {
+var backupCollection = function backupCollection(collection, backupData, logPath) {
   console.log("Backing up Collection '" + logPath + collection.id + "'");
 
   // TODO: implement feature to skip certain Collections
@@ -170,8 +153,6 @@ var backupCollection = function backupCollection(collection, backupPath, logPath
   // }
 
   try {
-    _mkdirp2.default.sync(backupPath);
-
     return collection.listDocuments().then(function (documentRefs) {
       return Promise.all(documentRefs.map(function (documentRef) {
         return documentRef.get();
@@ -179,7 +160,8 @@ var backupCollection = function backupCollection(collection, backupPath, logPath
         var backupFunctions = [];
         snapshots.forEach(function (document) {
           backupFunctions.push(function () {
-            var backupDocumentPromise = backupDocument(document, backupPath + '/' + document.id, logPath + collection.id + '/');
+            backupData[document.id] = {};
+            var backupDocumentPromise = backupDocument(document, backupData[document.id], logPath + collection.id + '/');
             restoreDocument(logPath + collection.id, document);
             return backupDocumentPromise;
           });
@@ -188,7 +170,7 @@ var backupCollection = function backupCollection(collection, backupPath, logPath
       });
     });
   } catch (error) {
-    console.log(_colors2.default.bold(_colors2.default.red("Unable to create backup path, skipping backup of Collection '" + collection.id + "': ")) + _colors2.default.bold(backupPath) + ' - ' + error);
+    console.log(_colors2.default.bold(_colors2.default.red("Error, skipping backup of Collection '" + collection.id + "': ")) + error);
     return Promise.reject(error);
   }
 };
@@ -251,11 +233,33 @@ var restoreBackup = function restoreBackup(path, restoreAccountDb) {
 var mustExecuteBackup = !!accountDb || !!accountDb && !!restoreAccountDb;
 if (mustExecuteBackup) {
   accountDb.getCollections().then(function (collections) {
-    return promiseSerial(collections.map(function (collection) {
+    var backupData = {};
+    if (collections.length > 0) {
+      backupData['__collections__'] = {};
+    }
+    return promiseSerial([...collections.map(function (collection) {
       return function () {
-        return backupCollection(collection, backupPath + '/' + collection.id, '/');
+        backupData['__collections__'][collection.id] = {};
+        return backupCollection(collection, backupData['__collections__'][collection.id], '/');
       };
-    }));
+    }), function () {
+      var fileContents = void 0;
+      if (prettyPrint === true) {
+        if (stable === true) {
+          fileContents = (0, _jsonStableStringify2.default)(backupData, { space: 2 });
+        } else {
+          fileContents = JSON.stringify(backupData, null, 2);
+        }
+      } else {
+        if (stable === true) {
+          fileContents = (0, _jsonStableStringify2.default)(backupData);
+        } else {
+          fileContents = JSON.stringify(backupData);
+        }
+      }
+      _fs2.default.writeFileSync(backupPath, fileContents);
+      return Promise.resolve();
+    }]);
   });
 }
 
